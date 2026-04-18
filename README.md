@@ -1,7 +1,6 @@
 # Welcome to your Bonsai Garden
 
-Run large language models entirely in your browser. 
-No server, no API key, completely private.
+Run local large language models entirely in your browser. 
 
 Built on top of [webml-community/bonsai-webgpu](https://huggingface.co/spaces/webml-community/bonsai-webgpu) by Xenova / HuggingFace.
 
