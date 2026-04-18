@@ -7,6 +7,7 @@ Built on top of [webml-community/bonsai-webgpu](https://huggingface.co/spaces/we
 
 **[→ Try it live](https://twinkites.github.io/bonsai-garden/)** 
 
+**Note: Bonsai Garden runs best on desktop browsers like Chrome and Firefox. It may not work on mobile browsers (on your phone).**
 
 ---
 
