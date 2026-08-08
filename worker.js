@@ -6,7 +6,27 @@ import {
   TextStreamer,
   DynamicCache,
   InterruptableStoppingCriteria,
-} from "https://esm.sh/@huggingface/transformers@4.1.0";
+  env,
+} from "./vendor/transformers.js";
+
+// By default transformers.js fetches the ONNX Runtime WASM binaries from
+// cdn.jsdelivr.net on every model load. Pin them to the locally vendored
+// copies instead, so no request ever leaves the device.
+// isSafari() mirrors transformers.js's own browser detection — we must
+// replicate it since setting wasmPaths ourselves skips its internal check.
+function isSafari() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  const vendor = navigator.vendor || "";
+  const isAppleVendor = vendor.indexOf("Apple") > -1;
+  const notOtherBrowser = !ua.match(/CriOS|FxiOS|EdgiOS|OPiOS|mercury|brave/i) && !ua.includes("Chrome") && !ua.includes("Android");
+  return isAppleVendor && notOtherBrowser;
+}
+const wasmVariant = isSafari() ? "ort-wasm-simd-threaded" : "ort-wasm-simd-threaded.asyncify";
+env.backends.onnx.wasm.wasmPaths = {
+  mjs:  new URL(`./vendor/${wasmVariant}.mjs`, import.meta.url).href,
+  wasm: new URL(`./vendor/${wasmVariant}.wasm`, import.meta.url).href,
+};
 
 const MODELS = {
   "smollm2-135m": {
@@ -36,6 +56,12 @@ const MODELS = {
     dtype: "q4",
     params: { max_new_tokens: 1024, do_sample: true, temperature: 0.6, top_p: 0.95, top_k: 20 },
   },
+  "lfm2.5-2.6b": {
+    id: "LiquidAI/LFM2.5-2.6B-ONNX",
+    dtype: "q4f16",
+    // Recommended sampling per model card; model reasons via <think> before answering
+    params: { max_new_tokens: 2048, do_sample: true, temperature: 0.1, top_k: 50, repetition_penalty: 1.1 },
+  },
   "smolvlm-256m": {
     id: "HuggingFaceTB/SmolVLM-256M-Instruct",
     vision: true,
@@ -64,6 +90,38 @@ class PipelineRegistry {
 let visionProcessor = null;
 let visionModel     = null;
 let visionModelKey  = null;
+
+// ── Speech-to-text pipeline (local Whisper, for voice input) ───────────────────
+const ASR_MODEL_ID = "onnx-community/whisper-base";
+let asrPipeline = null;
+
+async function loadAsr() {
+  if (asrPipeline) { self.postMessage({ status: "asr_ready" }); return; }
+  try {
+    asrPipeline = await pipeline("automatic-speech-recognition", ASR_MODEL_ID, {
+      device: "webgpu",
+      dtype: { encoder_model: "fp32", decoder_model_merged: "q4" },
+      progress_callback: (info) => {
+        if (info.status === "progress_total") {
+          self.postMessage({ status: "asr_progress", loaded: Number(info.loaded ?? 0), total: Number(info.total ?? 0) });
+        }
+      },
+    });
+    self.postMessage({ status: "asr_ready" });
+  } catch (e) {
+    self.postMessage({ status: "asr_error", data: e.message });
+  }
+}
+
+// audio: mono Float32Array sampled at 16kHz
+async function transcribe(audio) {
+  try {
+    const result = await asrPipeline(audio);
+    self.postMessage({ status: "transcript", data: result.text ?? "" });
+  } catch (e) {
+    self.postMessage({ status: "asr_error", data: e.message });
+  }
+}
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 const stopping_criteria = new InterruptableStoppingCriteria();
@@ -252,6 +310,9 @@ self.addEventListener("message", async ({ data: { type, data } }) => {
     }
 
     case "interrupt": stopping_criteria.interrupt(); break;
+
+    case "load_asr": loadAsr(); break;
+    case "transcribe": transcribe(data.audio); break;
 
     case "reset":
       disposePastKeyValues();

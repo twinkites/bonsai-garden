@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; worker-src 'self' blob:; connect-src https://huggingface.co https://cdn-lfs.hf.co https://cdn-lfs-us-1.hf.co https://esm.sh https://cdn.jsdelivr.net; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src https://huggingface.co https://cdn-lfs.hf.co https://cdn-lfs-us-1.hf.co; img-src 'self' data:; style-src 'self' 'unsafe-inline';" />
   <title>A garden for your Bonsai: LLMs in Your Browser</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌳</text></svg>" />
   <link rel="manifest" href="./manifest.json" />
-  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js" integrity="sha384-eEu5CTj3qGvu9PdJuS+YlkNi7d2XxQROAFYOr59zgObtlcux1ae1Il3u7jvdCSWu" crossorigin="anonymous"></script>
-  <link id="hljs-theme" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous" />
-  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/build/highlight.min.js" integrity="sha384-K/fCTfxXQtSNBeQg2oK1MZ1vA+aoLT0bpAUoRThQQZXzXcsU5MRKB+OZnojaltzz" crossorigin="anonymous"></script>
+  <script src="./vendor/marked.min.js"></script>
+  <script src="./vendor/purify.min.js"></script>
+  <link id="hljs-theme" rel="stylesheet" href="./vendor/github-dark.min.css" />
+  <script src="./vendor/highlight.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -352,15 +352,21 @@
     .msg.user .bubble { background: var(--user-bg); border-color: rgba(121,192,255,0.2); }
     .msg .bubble.thinking { color: var(--muted); font-style: italic; }
 
-    .copy-btn {
-      align-self: flex-end; font-size: 11px; color: #444;
+    .msg-actions { display: flex; gap: 4px; align-self: flex-end; }
+    .msg-actions button {
+      font-size: 11px; color: #444;
       background: none; border: 1px solid transparent;
       border-radius: 6px; padding: 2px 8px; cursor: pointer;
       transition: color 0.15s, border-color 0.15s; display: none;
     }
-    .copy-btn.visible { display: block; }
-    .copy-btn:hover { color: var(--muted); border-color: var(--border); }
-    .copy-btn.copied { color: var(--accent); }
+    .msg-actions button.visible { display: block; }
+    .msg-actions button:hover:not(:disabled) { color: var(--muted); border-color: var(--border); }
+    .msg-actions button.copied { color: var(--accent); }
+    .msg-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .edit-textarea {
+      width: 100%; min-height: 60px; background: transparent; color: inherit;
+      font: inherit; line-height: 1.65; border: none; outline: none; resize: vertical;
+    }
 
     /* Markdown */
     .bubble p { margin-bottom: 10px; }
@@ -614,6 +620,16 @@
               <div class="mc-meta">~400 MB · q4 · WebGPU · Knowledge: early 2025</div>
             </button>
 
+            <button class="model-card" data-key="lfm2.5-2.6b">
+              <div class="mc-top">
+                <span class="mc-icon">💧</span>
+                <span class="mc-name">LFM2.5 2.6B</span>
+                <span class="mc-tag blue">Reasoning</span>
+              </div>
+              <div class="mc-desc">Liquid AI's hybrid conv/attention model. Reasons via a &lt;think&gt; block before answering.</div>
+              <div class="mc-meta">~1.5 GB · q4f16 · WebGPU · Knowledge: 2025</div>
+            </button>
+
             <button class="model-card" data-key="smolvlm-256m">
               <div class="mc-top">
                 <span class="mc-icon">👁</span>
@@ -763,6 +779,7 @@
     "bonsai-4b":     "Bonsai 4B",
     "deepseek-r1":   "DeepSeek R1 1.5B",
     "qwen3-0.6b":    "Qwen3 0.6B",
+    "lfm2.5-2.6b":   "LFM2.5 2.6B",
     "smolvlm-256m":  "SmolVLM 256M",
     "__custom__":    "Custom Model",
   };
@@ -770,6 +787,7 @@
     "smollm2-135m": 256,
     "bonsai-1.7b":  1024, "bonsai-4b": 1024,
     "deepseek-r1":  8192, "qwen3-0.6b": 1024,
+    "lfm2.5-2.6b":  2048,
     "smolvlm-256m": 256,
     "__custom__":   1024,
   };
@@ -822,6 +840,13 @@
   let botBubble      = null;
   let botRawText     = "";
   let currentCopyBtn = null;
+  let currentRegenBtn = null;
+  let currentMsgEl   = null;
+  // Local Whisper voice input state
+  let asrReady          = false;
+  let asrLoadPromise     = null;
+  let pendingAsrResolve  = null;
+  let pendingAsrReject   = null;
   let autoScroll     = true;
   let lastNumTokens  = 0;
   let modelLoaded    = false;
@@ -961,18 +986,21 @@
       return;
     }
     suggestions.style.display = "none";
-    for (const msg of visible) {
+    messages.forEach((msg, idx) => {
+      if (msg.role === "system") return;
       if (msg.role === "user") {
-        _appendUserBubble(msg.content, msg.imageThumb ?? null);
+        _appendUserBubble(msg.content, msg.imageThumb ?? null, idx);
       } else if (msg.role === "assistant") {
-        const { bubble, copyBtn } = _appendBotBubble();
+        const { bubble, copyBtn, regenBtn, msgEl } = _appendBotBubble(idx);
         bubble.classList.remove("thinking");
         bubble.innerHTML = parseWithThink(msg.content);
         bubble.querySelectorAll("pre code").forEach(el => hljs.highlightElement(el));
         copyBtn.classList.add("visible");
         copyBtn.dataset.text = msg.content;
+        regenBtn.classList.add("visible");
+        msgEl.dataset.idx = idx;
       }
-    }
+    });
     messagesEl.scrollTop = messagesEl.scrollHeight;
     updateTurnCounter();
   }
@@ -1024,12 +1052,17 @@
     worker.addEventListener("message", onWorkerMessage);
   }
 
-  const VALID_STATUSES = new Set(["check_ok","progress","loading","ready","start","update","complete","error"]);
+  const VALID_STATUSES = new Set([
+    "check_ok","progress","loading","ready","start","update","complete","error",
+    "asr_progress","asr_ready","transcript","asr_error",
+  ]);
   function onWorkerMessage({ data }) {
     if (!data || !VALID_STATUSES.has(data.status)) return;
     if (data.status === "update" && typeof data.output !== "string") return;
     if (data.status === "complete" && typeof data.output !== "string") return;
     if (data.status === "error" && typeof data.data !== "string") return;
+    if (data.status === "transcript" && typeof data.data !== "string") return;
+    if (data.status === "asr_error" && typeof data.data !== "string") return;
     switch (data.status) {
       case "check_ok":
         loadBtn.disabled = selectedKey === "__custom__" ? !customModelId.value.trim() : false;
@@ -1059,9 +1092,11 @@
         sendBtn.disabled = true;
         unloadBtn.disabled = true;
         unloadBtn.style.opacity = "0.4";
-        { const { bubble, copyBtn } = _appendBotBubble();
+        { const { bubble, copyBtn, regenBtn, msgEl } = _appendBotBubble();
           botBubble = bubble;
-          currentCopyBtn = copyBtn; }
+          currentCopyBtn = copyBtn;
+          currentRegenBtn = regenBtn;
+          currentMsgEl = msgEl; }
         botRawText = "";
         break;
 
@@ -1086,6 +1121,8 @@
           currentCopyBtn.classList.add("visible");
           currentCopyBtn.dataset.text = data.output;
         }
+        if (currentRegenBtn) currentRegenBtn.classList.add("visible");
+        if (currentMsgEl) currentMsgEl.dataset.idx = messages.length - 1;
         if (lastNumTokens >= MODEL_MAX_TOKENS[selectedKey] - 5) {
           tokenWarning.style.display = "block";
         }
@@ -1093,6 +1130,8 @@
         messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: "smooth" });
         botBubble = null;
         currentCopyBtn = null;
+        currentRegenBtn = null;
+        currentMsgEl = null;
         break;
 
       case "error":
@@ -1109,6 +1148,46 @@
         streaming = false;
         stopBtn.classList.remove("visible");
         sendBtn.disabled = false;
+        break;
+
+      case "asr_progress":
+        if (data.total > 0) {
+          const pct = Math.round((data.loaded / data.total) * 100);
+          voiceInterim.textContent = `Loading voice model… ${pct}%`;
+        }
+        break;
+
+      case "asr_ready":
+        asrReady = true;
+        asrLoadPromise = null;
+        pendingAsrResolve?.();
+        pendingAsrResolve = null;
+        pendingAsrReject  = null;
+        break;
+
+      case "transcript": {
+        voiceInterim.textContent = "";
+        const text = data.data.trim();
+        if (text) {
+          const prefix = inputEl.value.trim() ? inputEl.value.trim() + " " : "";
+          inputEl.value = prefix + text;
+          resizeInput();
+          updateCharCounter();
+          inputEl.focus();
+        }
+        break;
+      }
+
+      case "asr_error":
+        voiceInterim.textContent = "";
+        asrLoadPromise = null;
+        if (pendingAsrReject) {
+          pendingAsrReject(new Error(data.data));
+          pendingAsrResolve = null;
+          pendingAsrReject  = null;
+        } else {
+          console.warn("Voice transcription error:", data.data);
+        }
         break;
     }
   }
@@ -1188,6 +1267,8 @@
     streaming = false;
     botBubble = null;
     currentCopyBtn = null;
+    currentRegenBtn = null;
+    currentMsgEl = null;
     lastNumTokens = 0;
     modelIsVision = false;
     tokenWarning.style.display = "none";
@@ -1195,6 +1276,13 @@
     scrollBtn.classList.remove("visible");
     attachBtn.classList.remove("available");
     clearPendingImage();
+
+    // Fresh worker — the local Whisper pipeline (if any) is gone, reload on next mic use
+    asrReady = false;
+    asrLoadPromise = null;
+    pendingAsrResolve = null;
+    pendingAsrReject  = null;
+    voiceInterim.textContent = "";
 
     showLoadScreen();
   }
@@ -1244,7 +1332,7 @@
     const userMsg = { role: "user", content: text };
     if (imgThumb) userMsg.imageThumb = imgThumb;  // thumbnail stored for history display
     messages.push(userMsg);
-    _appendUserBubble(text, imgThumb);
+    _appendUserBubble(text, imgThumb, messages.length - 1);
     messagesEl.scrollTop = messagesEl.scrollHeight;
 
     // Auto-title on first user message
@@ -1331,7 +1419,7 @@
   });
 
   // ── DOM helpers ─────────────────────────────────────────────────────────────
-  function _appendUserBubble(text, imageThumb) {
+  function _appendUserBubble(text, imageThumb, idx) {
     // Only accept safe image data URLs to prevent injection
     const safeThumb = (imageThumb && /^data:image\//.test(imageThumb)) ? imageThumb : null;
     const imgHtml = safeThumb ? `<img class="bubble-img" alt="Attached image" />` : "";
@@ -1339,26 +1427,39 @@
 
     const msg = document.createElement("div");
     msg.className = "msg user";
+    msg.dataset.idx = idx;
     msg.innerHTML = `
       <div class="avatar">👤</div>
       <div class="msg-body">
         <div class="bubble">${imgHtml}${escapeHtml(text).replace(/\n/g, "<br>")}</div>
+        <div class="msg-actions">
+          <button class="edit-btn visible" title="Edit and resend">Edit</button>
+        </div>
       </div>`;
     if (safeThumb) msg.querySelector(".bubble-img").src = safeThumb;
+    msg.querySelector(".edit-btn").addEventListener("click", () => {
+      if (streaming) return;
+      enterEditMode(msg, Number(msg.dataset.idx), text);
+    });
     messagesEl.appendChild(msg);
   }
 
-  function _appendBotBubble() {
+  function _appendBotBubble(idx) {
     const msg = document.createElement("div");
     msg.className = "msg bot";
+    if (idx !== undefined) msg.dataset.idx = idx;
     msg.innerHTML = `
       <div class="avatar">🌳</div>
       <div class="msg-body">
         <div class="bubble thinking">Thinking…</div>
-        <button class="copy-btn">Copy</button>
+        <div class="msg-actions">
+          <button class="copy-btn">Copy</button>
+          <button class="regen-btn" title="Regenerate response">Regenerate</button>
+        </div>
       </div>`;
     messagesEl.appendChild(msg);
-    const copyBtn = msg.querySelector(".copy-btn");
+    const copyBtn  = msg.querySelector(".copy-btn");
+    const regenBtn = msg.querySelector(".regen-btn");
     copyBtn.addEventListener("click", () => {
       navigator.clipboard.writeText(copyBtn.dataset.text ?? "").then(() => {
         copyBtn.textContent = "Copied!";
@@ -1366,7 +1467,65 @@
         setTimeout(() => { copyBtn.textContent = "Copy"; copyBtn.classList.remove("copied"); }, 2000);
       });
     });
-    return { bubble: msg.querySelector(".bubble"), copyBtn };
+    regenBtn.addEventListener("click", () => {
+      if (streaming) return;
+      const i = Number(msg.dataset.idx);
+      if (!Number.isNaN(i)) regenerateFrom(i);
+    });
+    return { bubble: msg.querySelector(".bubble"), copyBtn, regenBtn, msgEl: msg };
+  }
+
+  // ── Edit & resend / regenerate ──────────────────────────────────────────────
+  function enterEditMode(msgEl, idx, originalText) {
+    const bubble  = msgEl.querySelector(".bubble");
+    const actions = msgEl.querySelector(".msg-actions");
+    const imgEl   = bubble.querySelector(".bubble-img");
+    bubble.innerHTML = (imgEl ? imgEl.outerHTML : "") + `<textarea class="edit-textarea"></textarea>`;
+    const textarea = bubble.querySelector(".edit-textarea");
+    textarea.value = originalText;
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+    actions.innerHTML = `
+      <button class="edit-save-btn visible">Save &amp; Regenerate</button>
+      <button class="edit-cancel-btn visible">Cancel</button>`;
+    actions.querySelector(".edit-save-btn").addEventListener("click", () => {
+      const newText = textarea.value.trim();
+      if (!newText) return;
+      editAndResend(idx, newText);
+    });
+    actions.querySelector(".edit-cancel-btn").addEventListener("click", renderMessages);
+  }
+
+  function truncateMessages(idx) {
+    messages = messages.slice(0, idx);
+    const conv = activeConv();
+    if (conv) { conv.messages = [...messages]; saveStore(); }
+  }
+
+  function regenerateFrom(idx) {
+    if (streaming || !modelLoaded) return;
+    truncateMessages(idx);
+    const lastUser = [...messages].reverse().find(m => m.role === "user");
+    renderMessages();
+    autoScroll = true;
+    worker.postMessage({ type: "reset" });
+    worker.postMessage({ type: "generate", data: { messages: trimHistory(messages), imageDataUrl: lastUser?.imageThumb ?? null } });
+  }
+
+  function editAndResend(idx, newText) {
+    if (streaming || !modelLoaded) return;
+    const original = messages[idx];
+    truncateMessages(idx);
+    const editedMsg = { role: "user", content: newText };
+    if (original?.imageThumb) editedMsg.imageThumb = original.imageThumb;
+    messages.push(editedMsg);
+    const conv = activeConv();
+    if (conv) { conv.messages = [...messages]; saveStore(); }
+    renderMessages();
+    autoScroll = true;
+    worker.postMessage({ type: "reset" });
+    worker.postMessage({ type: "generate", data: { messages: trimHistory(messages), imageDataUrl: editedMsg.imageThumb ?? null } });
   }
 
   function renderBotBubble(text) {
@@ -1444,16 +1603,14 @@
   // ── Theme toggle ─────────────────────────────────────────────────────────────
   const themeBtn     = document.getElementById("theme-btn");
   const hljsThemeEl  = document.getElementById("hljs-theme");
-  const HLJS_DARK  = { href: "https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github-dark.min.css",  integrity: "sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" };
-  const HLJS_LIGHT = { href: "https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github.min.css", integrity: "sha384-eFTL69TLRZTkNfYZOLM+G04821K1qZao/4QLJbet1pP4tcF+fdXq/9CdqAbWRl/L" };
+  const HLJS_DARK  = "./vendor/github-dark.min.css";
+  const HLJS_LIGHT = "./vendor/github.min.css";
   let isDark = true;
 
   function applyTheme() {
     document.documentElement.dataset.theme = isDark ? "dark" : "light";
     themeBtn.textContent = isDark ? "🌙" : "☀️";
-    const t = isDark ? HLJS_DARK : HLJS_LIGHT;
-    hljsThemeEl.href = t.href;
-    hljsThemeEl.integrity = t.integrity;
+    hljsThemeEl.href = isDark ? HLJS_DARK : HLJS_LIGHT;
   }
   applyTheme();
   themeBtn.addEventListener("click", () => { isDark = !isDark; applyTheme(); });
@@ -1535,60 +1692,85 @@
     if (file) handleImageFile(file);
   });
 
-  // ── Voice input ──────────────────────────────────────────────────────────────
-  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SpeechRec) {
+  // ── Voice input (local Whisper — no audio ever leaves the device) ──────────────
+  const canRecordAudio = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder && window.OfflineAudioContext);
+  if (canRecordAudio) {
     micBtn.classList.add("available");
-    let recognition  = null;
-    let micActive    = false;
-    let accumulated  = "";
+    let mediaRecorder = null;
+    let audioChunks   = [];
+    let micActive     = false;
 
-    function buildRecognition() {
-      const r = new SpeechRec();
-      r.continuous     = false;
-      r.interimResults = true;
-      r.lang           = navigator.language || "en-US";
+    function ensureAsrLoaded() {
+      if (asrReady) return Promise.resolve();
+      if (asrLoadPromise) return asrLoadPromise;
+      voiceInterim.textContent = "Loading voice model…";
+      asrLoadPromise = new Promise((resolve, reject) => {
+        pendingAsrResolve = resolve;
+        pendingAsrReject  = reject;
+      });
+      worker.postMessage({ type: "load_asr" });
+      return asrLoadPromise;
+    }
 
-      r.onstart = () => {
-        micActive    = true;
-        accumulated  = inputEl.value.trimEnd();
-        micBtn.classList.add("listening");
-        voiceInterim.textContent = "";
-      };
-
-      r.onresult = (event) => {
-        let interim = "", final = "";
-        for (const result of event.results) {
-          if (result.isFinal) final   += result[0].transcript;
-          else                interim += result[0].transcript;
-        }
-        const prefix = accumulated ? accumulated + " " : "";
-        if (final) {
-          inputEl.value = prefix + final.trim();
-          accumulated   = inputEl.value.trimEnd();
-          voiceInterim.textContent = "";
-        } else {
-          voiceInterim.textContent = interim;
-        }
-        resizeInput();
-        updateCharCounter();
-      };
-
-      r.onerror = (e) => { if (e.error !== "aborted") console.warn("Speech error:", e.error); stopMic(); };
-      r.onend   = stopMic;
-      return r;
+    // Decode a recorded audio blob down to mono 16kHz PCM, as Whisper expects
+    async function decodeToMono16k(blob) {
+      const arrayBuffer = await blob.arrayBuffer();
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const tmpCtx = new AudioCtx();
+      const decoded = await tmpCtx.decodeAudioData(arrayBuffer);
+      tmpCtx.close();
+      const targetLength = Math.max(1, Math.ceil(decoded.duration * 16000));
+      const offline = new OfflineAudioContext(1, targetLength, 16000);
+      const src = offline.createBufferSource();
+      src.buffer = decoded;
+      src.connect(offline.destination);
+      src.start();
+      const rendered = await offline.startRendering();
+      return rendered.getChannelData(0);
     }
 
     function stopMic() {
       micActive = false;
       micBtn.classList.remove("listening");
-      voiceInterim.textContent = "";
-      recognition = null;
     }
 
-    micBtn.addEventListener("click", () => {
-      if (micActive) { recognition?.stop(); stopMic(); }
-      else           { recognition = buildRecognition(); recognition.start(); }
+    micBtn.addEventListener("click", async () => {
+      if (streaming) return;
+      if (micActive) { mediaRecorder?.stop(); return; }
+
+      try {
+        await ensureAsrLoaded();
+      } catch (e) {
+        voiceInterim.textContent = "";
+        console.warn("Voice model failed to load:", e.message);
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+        mediaRecorder.onstop = async () => {
+          stream.getTracks().forEach(t => t.stop());
+          stopMic();
+          voiceInterim.textContent = "Transcribing…";
+          try {
+            const audioData = await decodeToMono16k(new Blob(audioChunks, { type: mediaRecorder.mimeType }));
+            worker.postMessage({ type: "transcribe", data: { audio: audioData } }, [audioData.buffer]);
+          } catch (e) {
+            voiceInterim.textContent = "";
+            console.warn("Audio decode error:", e);
+          }
+        };
+        mediaRecorder.start();
+        micActive = true;
+        micBtn.classList.add("listening");
+        voiceInterim.textContent = "Listening… click mic to stop";
+      } catch (e) {
+        voiceInterim.textContent = "";
+        console.warn("Microphone permission error:", e);
+      }
     });
   }
 
