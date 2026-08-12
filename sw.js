@@ -38,7 +38,7 @@ self.addEventListener("fetch", (e) => {
   // caches those itself; let it manage them natively instead of double-caching.
   if (
     url.hostname.includes("huggingface.co") || url.hostname.includes("hf.co") ||
-    url.pathname.startsWith("/vendor/ort-wasm-simd-threaded")
+    url.pathname.includes("/vendor/ort-wasm-simd-threaded")
   ) {
     return;
   }
